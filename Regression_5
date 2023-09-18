@@ -1,0 +1,119 @@
+##Read data stored in .csv file
+
+df_SOC<- read.csv("SOC_GMLinear2.csv", fileEncoding="UTF-8-BOM")
+
+#check data frame (df)
+
+df_SOC$Soil_type <- factor(df_SOC$Soil_type, levels = c("Clay","Sandy","Sandy_Loam"),
+                           labels = c("Clay","Sandy","Sandy Loam"))
+df_SOC$Initial_SOC <- factor(df_SOC$Initial_SOC, levels = c("SOC_0.5","SOC_2","SOC_3","SOC_4","SOC_5","SOC_6"),
+                             labels = c("SOC 0.5%","SOC 2%","SOC 3%","SOC 4%","SOC 5%","SOC 6%"))
+df_SOC$Adaptation <- factor(df_SOC$Adaptation,levels = c("Simplified","Baseline","Diversified","Intensified"))
+---------------------------------------------------------------------------------------------------------------------------- 
+
+##Calculate mean and standard errors of specific Relative SOC change for each group.
+
+df_summary <- df_SOC %>%
+  group_by( Initial_SOC, Adaptation, Soil_type) %>%
+  summarise(
+    n = n(), # values in the grouping
+    mean_RelativeOC30_ton = mean(RelativeOC30_ton), # mean
+    sd_RelativeOC30_ton = sd(RelativeOC30_ton), # standard deviation
+    sem_RelativeOC30_ton = sd_RelativeOC30_ton/sqrt(n)) # formula for standard error
+
+-----------------------------------------------------------------------------------------------------------------------------
+  ##Visualize; plot both the individual specific Relative SOC change data and overlay the means and standard errors calculated above.
+  
+  # plot the means and the standard error bars but offset them for clarity
+  ggplot(df_summary, aes(x = Initial_SOC, y = mean_RelativeOC30_ton, color = Soil_type)) +
+  geom_point(position=position_dodge(width=0.3)) + # offset points
+  geom_errorbar( # add error bars
+    aes(ymin = mean_RelativeOC30_ton - sem_RelativeOC30_ton,
+        ymax = mean_RelativeOC30_ton + sem_RelativeOC30_ton),
+    width = 0.5, # width of error bars
+    position=position_dodge(width=0.3)) + # offset error bars
+  labs(x = "Initial SOC Levels", y = "Absolute SOC potential  (tCha‾¹)") + facet_wrap(~ Adaptation, nrow = 1) +
+  scale_color_d3()+
+  theme_bw(base_size = 12) + 
+  theme(legend.position="bottom") + 
+  theme(legend.title=element_blank()) +
+  theme(axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.spacing.x =unit(0.3,"cm", "lines"),
+        panel.spacing.y =unit(0.3,"cm", "lines"),
+        axis.ticks.length = unit(-3.99, "pt"),
+        axis.ticks.length.x = unit(-3.99, "pt"))+
+  theme( axis.text = element_text( size = 15, colour = "black"),
+         axis.text.y = element_text( size = 12, colour = "black" ),
+         axis.text.x = element_text( size = 12, colour = "black",hjust = 0.95,angle=90, vjust=0.2),
+         strip.text = element_text(size = 14, face="bold"),
+         legend.text=element_text(size=15))+
+  theme(legend.title=element_blank(),
+        axis.title.x = element_blank())+
+  theme(strip.text.y = element_text(face="plain"), strip.placement = "outside")
+------------------------------------------------------------------------------------------------------------------------------------
+
+# fit the model with interaction terms
+  
+fit_with_interaction <- lm(RelativeOC30_ton ~ 1 + Initial_SOC + Soil_type + Adaptation + Initial_SOC:Adaptation+ Initial_SOC:Soil_type+ Adaptation:Soil_type, data = df_SOC)
+summary(fit_with_interaction, format = "markdown", ask=FALSE) #estimated model parameters
+
+##A call to anova
+
+anova_table <- anova(fit_with_interaction) # produce ANOVA table
+anova_table
+
+-------------------------------------------------------------------------------------------------------------------------------------
+##Calculate permutation-based importance with r-squared as metric
+  
+p_r2 <- vip::vi(fit_with_interaction, method = "permute", target = "RelativeOC30_ton", metric = "rsquared", pred_wrapper = predict, nsim = 1000)
+
+# plot VIP importance data
+
+p_r2$Variable <- factor(p_r2$Variable, levels = c("Adaptation","Soil_type","Initial_SOC"),
+                        labels = c("Adaptation","Soil type","Initial SOC"))
+
+Impact <- ggplot(p_r2, aes(x = Importance, y = Variable, fill = Variable)) +
+  geom_bar(stat="identity",width = 0.6, position="dodge") + # offset points
+  geom_errorbar( # add error bars
+    aes(xmin = Importance - StDev,
+        xmax = Importance + StDev),
+    width = 0.3, # width of error bars
+    position="dodge" # offset error bars
+  ) + scale_x_continuous(limits = c(0, 1.1), breaks = seq(0, 1.1, 0.1)) +
+  labs(x = "Variable Importance (VIP) Score", y = "") +
+  scale_fill_manual(values = c("#00AFBB", "#E7B800", "#FC4E07"))+
+  theme_bw(base_size = 12) + 
+  theme(legend.position=c(0.97, 0.5),legend.justification = c(1, 0.8)) +
+  theme(legend.title=element_blank(),
+        legend.key.size = unit(0.9, 'cm'),
+        legend.key.width = unit(0.8,"cm"),
+        legend.spacing.y = unit(0.55, "mm"))+
+  theme(axis.line = element_line(colour = "black"),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  theme( axis.text = element_text( size = 12, colour = "black"),
+         axis.text.y = element_text( size = 12, colour = "black" ),
+         axis.text.x = element_text( size = 12, colour = "black"),
+         legend.text=element_text(size=12))
+
+Impact
+
+ggsave("Impact1c.png", Impact, width=15, height=8, units="cm", dpi=300)
+
+ggsave("Impact1c.tiff", Impact, width=15, height=8, units="cm", dpi=300)
+
+-------------------------------------------------------------------------------------------------------------------------------------  
+
+##Post HOC Tukey’s test to show the differences between all paired level combinations for initial SOC, Soil type and Adaptation.
+
+summary(glht(fit_with_interaction, linfct = mcp(Adaptation = "Tukey"))) # perform Tukey's test
+
+summary(glht(fit_with_interaction, linfct = mcp(Soil_type = "Tukey"))) # perform Tukey's test
+
+summary(glht(fit_with_interaction, linfct = mcp(Initial_SOC = "Tukey"))) # perform Tukey's test
+
+
+## Generate LM Model report
+report::report(fit_with_interaction)
